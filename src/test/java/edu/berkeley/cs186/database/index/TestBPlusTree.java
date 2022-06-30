@@ -485,4 +485,34 @@ public class TestBPlusTree {
         assertEquals(3, InnerNode.maxOrder(pageSizeInBytes, keySchema));
         assertEquals(3, BPlusTree.maxOrder(pageSizeInBytes, keySchema));
     }
+
+    @Test
+    @Category(PublicTests.class)
+    public void testScanAll() {
+        BPlusTree tree = getBPlusTree(Type.intType(), 1);
+        for (int i = 0; i < 40; i++) {
+            tree.put(new IntDataBox(i), new RecordId(i, (short) i));
+        }
+        Iterator<RecordId> iter = tree.scanAll();
+        int i = 0;
+        while (iter.hasNext()) {
+            assertEquals(new RecordId(i, (short) i), iter.next());
+            ++i;
+        }
+    }
+
+    @Test
+    @Category(PublicTests.class)
+    public void testScanGreaterEqual() {
+        BPlusTree tree = getBPlusTree(Type.intType(), 3);
+        for (int i = 0; i < 40; i++) {
+            tree.put(new IntDataBox(i), new RecordId(i, (short) i));
+        }
+        Iterator<RecordId> iter = tree.scanGreaterEqual(new IntDataBox(10));
+        int i = 10;
+        while (iter.hasNext()) {
+            assertEquals(new RecordId(i, (short) i), iter.next());
+            ++i;
+        }
+    }
 }

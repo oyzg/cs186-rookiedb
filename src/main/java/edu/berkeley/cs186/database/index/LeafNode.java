@@ -10,6 +10,7 @@ import edu.berkeley.cs186.database.memory.Page;
 import edu.berkeley.cs186.database.table.RecordId;
 
 import java.nio.ByteBuffer;
+import java.security.Key;
 import java.util.*;
 
 /**
@@ -146,25 +147,36 @@ class LeafNode extends BPlusNode {
     // See BPlusNode.get.
     @Override
     public LeafNode get(DataBox key) {
-        // TODO(proj2): implement
-
-        return null;
+        return this;
     }
 
     // See BPlusNode.getLeftmostLeaf.
     @Override
     public LeafNode getLeftmostLeaf() {
-        // TODO(proj2): implement
-
-        return null;
+        return this;
     }
 
     // See BPlusNode.put.
     @Override
     public Optional<Pair<DataBox, Long>> put(DataBox key, RecordId rid) {
-        // TODO(proj2): implement
-
-        return Optional.empty();
+        if (keys.contains(key)) {
+            throw new BPlusTreeException("the key is exist");
+        }
+        int idx = InnerNode.numLessThan(key, keys);
+        keys.add(idx, key);
+        rids.add(idx, rid);
+        if (keys.size() <= metadata.getOrder() * 2) {
+            sync();
+            return Optional.empty();
+        }
+        List<DataBox> rightKeys = keys.subList(metadata.getOrder(), keys.size());
+        List<RecordId> rightRids = rids.subList(metadata.getOrder(), rids.size());
+        keys = keys.subList(0, metadata.getOrder());
+        rids = rids.subList(0, metadata.getOrder());
+        LeafNode right = new LeafNode(metadata, bufferManager, rightKeys, rightRids, rightSibling, treeContext);
+        rightSibling = Optional.of(right.getPage().getPageNum());
+        sync();
+        return Optional.of(new Pair(rightKeys.get(0), right.getPage().getPageNum()));
     }
 
     // See BPlusNode.bulkLoad.
@@ -172,15 +184,39 @@ class LeafNode extends BPlusNode {
     public Optional<Pair<DataBox, Long>> bulkLoad(Iterator<Pair<DataBox, RecordId>> data,
             float fillFactor) {
         // TODO(proj2): implement
-
-        return Optional.empty();
+        int maxRecords = (int)Math.ceil(fillFactor * metadata.getOrder() * 2);
+        while (keys.size() < maxRecords && data.hasNext()) {
+            Pair<DataBox, RecordId> record = data.next();
+            keys.add(record.getFirst());
+            rids.add(record.getSecond());
+        }
+        Optional<Pair<DataBox, Long>> opt = Optional.empty();
+        if (data.hasNext()) {
+            List<DataBox> rightKeys = new ArrayList<>();
+            List<RecordId> rightRids = new ArrayList<>();
+            Pair<DataBox, RecordId> next = data.next();
+            rightRids.add(next.getSecond());
+            rightKeys.add(next.getFirst());
+            LeafNode right = new LeafNode(metadata, bufferManager, rightKeys, rightRids, rightSibling, treeContext);
+            rightSibling = Optional.of(right.getPage().getPageNum());
+            opt = Optional.of(new Pair(next.getFirst(),rightSibling.get()));
+        }
+        sync();
+        return opt;
     }
 
     // See BPlusNode.remove.
     @Override
     public void remove(DataBox key) {
-        // TODO(proj2): implement
-
+        if (!keys.contains(key)) {
+            throw new BPlusTreeException("the key isn't exist");
+        }
+        int index = keys.indexOf(key);
+        if (index >= 0) {
+            keys.remove(index);
+            rids.remove(index);
+            sync();
+        }
         return;
     }
 
@@ -372,12 +408,27 @@ class LeafNode extends BPlusNode {
      */
     public static LeafNode fromBytes(BPlusTreeMetadata metadata, BufferManager bufferManager,
                                      LockContext treeContext, long pageNum) {
-        // TODO(proj2): implement
         // Note: LeafNode has two constructors. To implement fromBytes be sure to
         // use the constructor that reuses an existing page instead of fetching a
         // brand new one.
 
-        return null;
+        Page page = bufferManager.fetchPage(treeContext, pageNum);
+        Buffer buf = page.getBuffer();
+
+        byte nodeType = buf.get();
+        assert(nodeType == (byte) 1);
+
+        List<DataBox> keys = new ArrayList<>();
+        List<RecordId> rids = new ArrayList<>();
+        long rs = buf.getLong();
+        Optional<Long> rightSibling = rs == -1 ? Optional.empty() : Optional.of(rs);
+        int n = buf.getInt();
+        for (int i = 0; i < n; ++i) {
+            keys.add(DataBox.fromBytes(buf, metadata.getKeySchema()));
+            rids.add(RecordId.fromBytes(buf));
+        }
+
+        return new LeafNode(metadata, bufferManager, page, keys, rids, rightSibling,treeContext);
     }
 
     // Builtins ////////////////////////////////////////////////////////////////
